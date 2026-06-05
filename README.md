@@ -33,8 +33,10 @@ Downstream spatial analysis was conducted in R and ArcGIS Online, including:
 ## Repository Contents
 
 | File | Description |
+
 |------|-------------|
 | `pharmacy_closures_2019_2024.sql` | SQL pipeline: data cleaning, dual-key closure identification, aggregation by pharmacy type and borough, community district export for spatial analysis |
+| `pharmacy_spatial_analysis.Rmd` | R Markdown: bivariate spatial correlation analysis (Lee's L) testing the relationship between neighborhood poverty rates and chain vs. independent pharmacy presence across NYC |
 
 ## Tools
 
