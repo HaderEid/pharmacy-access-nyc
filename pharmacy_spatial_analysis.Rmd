@@ -1,0 +1,313 @@
+---
+title: "Bivariate Spatial Analysis: Poverty and Pharmacy Distribution in NYC"
+author: "Hader Abdel Hamed Eid"
+date: "2024-12-16"
+output: html_document
+---
+```{r}
+################################################################################
+# BIVARIATE MORAN'S I ANALYSIS
+# Testing Spatial Relationship Between Poverty and Pharmacy Distribution
+# Hadeer Eid - NYC Pharmacy Equity Study
+################################################################################
+```
+
+
+```{r}
+library(sf)
+library(spdep)
+library(tidyverse)
+
+cat("\n")
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n")
+# Bivariate spatial correlation: poverty vs pharmacy distribution
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n\n")
+```
+
+
+```{r}
+# Assuming you have pharmacy_sf loaded with:
+# - poverty_pct (continuous poverty rate)
+# - is_chain (0/1 for chain vs non-chain)
+# - pharmacy_count (or similar for total pharmacy density)
+```
+
+
+```{r}
+# Check your data
+cat("Data Summary:\n")
+cat("Total observations:", nrow(pharmacy_sf), "\n")
+cat("Missing poverty_pct:", sum(is.na(pharmacy_sf$poverty_pct)), "\n")
+cat("Missing is_chain:", sum(is.na(pharmacy_sf$is_chain)), "\n\n")
+
+# Filter complete cases
+pharmacy_complete <- pharmacy_sf %>%
+  filter(!is.na(poverty_pct) & !is.na(is_chain))
+
+cat("Complete cases for analysis:", nrow(pharmacy_complete), "\n\n")
+
+# Create spatial weights (k-nearest neighbors, k=8)
+coords <- st_coordinates(pharmacy_complete)
+knn_nb <- knn2nb(knearneigh(coords, k = 8))
+knn_weights <- nb2listw(knn_nb, style = "W", zero.policy = TRUE)
+```
+
+
+```{r}
+################################################################################
+# TEST 1: POVERTY vs CHAIN PHARMACY PRESENCE
+################################################################################
+
+cat("\n")
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n")
+# Test 1: Poverty vs chain pharmacy presence
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n\n")
+
+cat("Research Question: Are high-poverty areas surrounded by low chain pharmacy presence?\n\n")
+
+# Lee's L statistic (bivariate spatial correlation)
+# This tests if poverty in location i is correlated with chain presence in neighboring locations j
+lee_chain <- lee.test(
+  x = pharmacy_complete$poverty_pct,
+  y = pharmacy_complete$is_chain,
+  listw = knn_weights,
+  zero.policy = TRUE,
+  alternative = "two.sided"
+)
+
+cat("Lee's L Bivariate Spatial Correlation Test:\n")
+cat("------------------------------------------\n")
+print(lee_chain)
+cat("\n")
+
+# Extract key statistics
+lee_stat_chain <- lee_chain$estimate[1]
+lee_pval_chain <- lee_chain$p.value
+
+cat("KEY FINDINGS:\n")
+cat("  Lee's L statistic:", round(lee_stat_chain, 4), "\n")
+cat("  P-value:", format.pval(lee_pval_chain, digits = 3), "\n\n")
+
+cat("INTERPRETATION:\n")
+if (lee_pval_chain < 0.05) {
+  if (lee_stat_chain < 0) {
+    cat("  ✓ SIGNIFICANT NEGATIVE CORRELATION (p < .05)\n")
+    cat("    → High-poverty areas are surrounded by LOW chain pharmacy presence\n")
+    cat("    → Low-poverty areas are surrounded by HIGH chain pharmacy presence\n")
+    cat("    → This confirms systematic spatial mismatch between poverty and chain access\n")
+  } else {
+    cat("  ✓ SIGNIFICANT POSITIVE CORRELATION (p < .05)\n")
+    cat("    → High-poverty areas are surrounded by HIGH chain pharmacy presence\n")
+    cat("    → This would suggest chains serve high-need areas\n")
+  }
+} else {
+  cat("  ✗ NOT SIGNIFICANT (p ≥ .05)\n")
+  cat("    → No significant spatial relationship detected\n")
+}
+cat("\n")
+```
+
+
+```{r}
+################################################################################
+# TEST 2: POVERTY vs TOTAL PHARMACY DENSITY
+################################################################################
+
+cat("\n")
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n")
+# Test 2: Poverty vs total pharmacy density
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n\n")
+
+# Calculate pharmacy density per census tract
+# If you have census tract data aggregated:
+# For now, using binary indicator - you may need to aggregate by tract first
+
+# Alternative approach: count pharmacies per census tract
+# This assumes you have a census_tract_id variable
+if ("census_tract_id" %in% names(pharmacy_complete)) {
+  
+  cat("Calculating pharmacy density by census tract...\n")
+  
+  # Aggregate to census tract level
+  tract_data <- pharmacy_complete %>%
+    st_drop_geometry() %>%
+    group_by(census_tract_id) %>%
+    summarise(
+      pharmacy_count = n(),
+      mean_poverty = mean(poverty_pct, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # Get tract geometry (assuming first occurrence is representative)
+  tract_sf <- pharmacy_complete %>%
+    group_by(census_tract_id) %>%
+    slice(1) %>%
+    ungroup() %>%
+    select(census_tract_id) %>%
+    left_join(tract_data, by = "census_tract_id")
+  
+  # Create spatial weights for tracts
+  tract_coords <- st_coordinates(st_centroid(tract_sf))
+  tract_knn_nb <- knn2nb(knearneigh(tract_coords, k = 8))
+  tract_knn_weights <- nb2listw(tract_knn_nb, style = "W", zero.policy = TRUE)
+  
+  cat("Census tracts:", nrow(tract_sf), "\n\n")
+  
+  # Lee's L for total pharmacy density
+  lee_total <- lee.test(
+    x = tract_sf$mean_poverty,
+    y = tract_sf$pharmacy_count,
+    listw = tract_knn_weights,
+    zero.policy = TRUE,
+    alternative = "two.sided"
+  )
+  
+  cat("Lee's L Bivariate Spatial Correlation Test:\n")
+  cat("------------------------------------------\n")
+  print(lee_total)
+  cat("\n")
+  
+  # Extract key statistics
+  lee_stat_total <- lee_total$estimate[1]
+  lee_pval_total <- lee_total$p.value
+  
+  cat("KEY FINDINGS:\n")
+  cat("  Lee's L statistic:", round(lee_stat_total, 4), "\n")
+  cat("  P-value:", format.pval(lee_pval_total, digits = 3), "\n\n")
+  
+  cat("INTERPRETATION:\n")
+  if (lee_pval_total < 0.05) {
+    if (lee_stat_total < 0) {
+      cat("  ✓ SIGNIFICANT NEGATIVE CORRELATION (p < .05)\n")
+      cat("    → High-poverty areas have LOW total pharmacy density\n")
+      cat("    → Low-poverty areas have HIGH total pharmacy density\n")
+      cat("    → Pharmacy deserts exist in high-poverty neighborhoods\n")
+    } else {
+      cat("  ✓ SIGNIFICANT POSITIVE CORRELATION (p < .05)\n")
+      cat("    → High-poverty areas have HIGH total pharmacy density\n")
+      cat("    → This suggests overall pharmacy access is better in high-need areas\n")
+    }
+  } else {
+    cat("  ✗ NOT SIGNIFICANT (p ≥ .05)\n")
+    cat("    → No significant spatial relationship detected\n")
+  }
+  cat("\n")
+  
+} else {
+  cat("Note: Census tract aggregation requires 'census_tract_id' variable.\n")
+  cat("Running alternative analysis using pharmacy-level data...\n\n")
+  
+  # Alternative: Use binary indicator for pharmacy presence
+  # Create a variable indicating pharmacy density in neighborhood
+  # This is less ideal but works with current data structure
+  
+  # For each pharmacy, calculate number of pharmacies within certain distance
+  pharmacy_complete$pharmacy_density <- lengths(knn_nb)
+  
+  lee_total_alt <- lee.test(
+    x = pharmacy_complete$poverty_pct,
+    y = pharmacy_complete$pharmacy_density,
+    listw = knn_weights,
+    zero.policy = TRUE,
+    alternative = "two.sided"
+  )
+  
+  cat("Lee's L Test (using local pharmacy density):\n")
+  cat("------------------------------------------\n")
+  print(lee_total_alt)
+  cat("\n")
+  
+  lee_stat_total <- lee_total_alt$estimate[1]
+  lee_pval_total <- lee_total_alt$p.value
+  
+  cat("KEY FINDINGS:\n")
+  cat("  Lee's L statistic:", round(lee_stat_total, 4), "\n")
+  cat("  P-value:", format.pval(lee_pval_total, digits = 3), "\n\n")
+  
+  cat("Note: This tests local clustering intensity, not census tract-level density.\n\n")
+}
+```
+
+
+```{r}
+################################################################################
+# COMPARISON SUMMARY
+################################################################################
+
+cat("\n")
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n")
+# Summary
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n\n")
+
+cat("Test 1 (Poverty vs Chain Pharmacies):\n")
+cat("  Lee's L =", round(lee_stat_chain, 4), ", p =", format.pval(lee_pval_chain, digits = 3), "\n")
+if (lee_pval_chain < 0.05 & lee_stat_chain < 0) {
+  cat("  → Chain pharmacies avoid high-poverty areas (CONFIRMED)\n")
+}
+
+cat("\nTest 2 (Poverty vs Total Pharmacy Density):\n")
+cat("  Lee's L =", round(lee_stat_total, 4), ", p =", format.pval(lee_pval_total, digits = 3), "\n")
+if (lee_pval_total < 0.05 & lee_stat_total < 0) {
+  cat("  → Overall pharmacy access is lower in high-poverty areas\n")
+} else if (lee_pval_total < 0.05 & lee_stat_total > 0) {
+  cat("  → Overall pharmacy access is higher in high-poverty areas\n")
+  cat("  → Independent pharmacies may be compensating for chain absence\n")
+}
+
+cat("\n")
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n")
+# Done
+cat("=" %>% rep(80) %>% paste(collapse = ""), "\n")
+```
+
+
+```{r}
+################################################################################
+# OPTIONAL: VISUALIZATION
+################################################################################
+
+cat("\nCreating bivariate Moran scatterplot...\n")
+
+# Moran scatterplot for poverty vs chain pharmacies
+png("outputs/bivariate_moran_scatterplot.png", 
+    width = 10, height = 8, units = "in", res = 300)
+
+par(mfrow = c(1, 2))
+
+# Plot 1: Poverty vs Spatially Lagged Chain Presence
+lag_chain <- lag.listw(knn_weights, pharmacy_complete$is_chain)
+plot(pharmacy_complete$poverty_pct, lag_chain,
+     xlab = "Poverty Rate (%)",
+     ylab = "Spatially Lagged Chain Pharmacy Presence",
+     main = "Bivariate Moran: Poverty vs Chain Pharmacies",
+     pch = 19, col = alpha("blue", 0.3))
+abline(lm(lag_chain ~ pharmacy_complete$poverty_pct), col = "red", lwd = 2)
+abline(h = mean(lag_chain), v = mean(pharmacy_complete$poverty_pct), 
+       lty = 2, col = "gray")
+text(max(pharmacy_complete$poverty_pct)*0.8, max(lag_chain)*0.9,
+     paste0("Lee's L = ", round(lee_stat_chain, 3), "\np = ", 
+            format.pval(lee_pval_chain, digits = 2)),
+     cex = 1.2, font = 2)
+
+# Plot 2: If using tract data
+if (exists("tract_sf")) {
+  lag_total <- lag.listw(tract_knn_weights, tract_sf$pharmacy_count)
+  plot(tract_sf$mean_poverty, lag_total,
+       xlab = "Mean Poverty Rate (%)",
+       ylab = "Spatially Lagged Total Pharmacies",
+       main = "Bivariate Moran: Poverty vs Total Pharmacy Density",
+       pch = 19, col = alpha("darkgreen", 0.3))
+  abline(lm(lag_total ~ tract_sf$mean_poverty), col = "red", lwd = 2)
+  abline(h = mean(lag_total), v = mean(tract_sf$mean_poverty), 
+         lty = 2, col = "gray")
+  text(max(tract_sf$mean_poverty)*0.8, max(lag_total)*0.9,
+       paste0("Lee's L = ", round(lee_stat_total, 3), "\np = ", 
+              format.pval(lee_pval_total, digits = 2)),
+       cex = 1.2, font = 2)
+}
+
+dev.off()
+
+cat("Scatterplot saved to: outputs/bivariate_moran_scatterplot.png\n")
+```
+
